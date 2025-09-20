@@ -1,0 +1,6 @@
+lgpio==0.2.0.0
+pytest==7.4.4
+empy==3.3.4
+catkin_pkg==1.0.0
+numpy==1.26.4
+lark==1.1.9

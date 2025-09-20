@@ -1,0 +1,41 @@
+.DS_Store
+.cursor
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# ROS2 / Colcon build artifacts
+build/
+install/
+log/
+
+# Meson/Ninja and CMake build dirs (e.g., libcamera/kmsxx)
+builddir/
+**/builddir/
+**/build/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+
+# Misc
+*.egg-info/
+dist/
+*.log
