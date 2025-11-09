@@ -12,6 +12,12 @@
 
 <br>
 <br> 
+
+I have written 2 blog articles about Just1:   
+- [How I built a small autonomous robot](https://nrdrgz.github.io/2025/10/21/building-just1-autonomous-robot/)
+- [How I used Foxglove](https://nrdrgz.github.io/2025/10/22/foxglove-studio-robotics-visualization/)
+
+
 Just1 is an open-source robotics platform designed for learning and experimentation.  
 It can navigate manually or autonomously, follow a path, avoid obstacles.  
 
