@@ -2,43 +2,42 @@
 
 ## Overview
 
-Just1 uses a single 4S LiFePO4 32700 pack (12.8V nominal, 7Ah) as the sole power source for the entire robot. A single battery eliminates the need for a separate Pi power bank and a motor pack, reduces failure points, and simplifies charging (one charger, one connector). LiFePO4 chemistry eliminates thermal runaway risks and offers >1200 cycle lifespan.
+Just1 uses a single 4S Graphene LiPo drone battery (14.8V nominal, 16.8V max, 1300mAh, 75C) as the sole power source for the entire robot. A single battery eliminates the need for a separate Pi power bank and a motor pack. The LiPo is extremely lightweight, heavily improving the robot's agility and TT motor performance. A BX100 buzzer MUST be plugged into the balance port during operation for low-voltage warning.
 
 ## Power Distribution Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  4S LiFePO4 32700 Pack (12.8V nominal, 11.2–14.6V range)   │
-│  Built-in BMS: 4S 40A balanced, over-discharge,            │
-│  short-circuit, cell balance                                │
+│  4S Graphene LiPo Battery (14.8V nominal, 16.8V max)       │
+│  Requires external BX100 buzzer for low-voltage alarm!      │
 └──────────────────┬──────────────────────────────────────────┘
-                   │ XT60 (red + / black −) → master switch (see Step 1) → XT60 out → optional 1→3 splitter → loads
+                   │ XT60 (red + / black −) → master switch (see Step 1) → XT60 out → 1→2 splitter → loads
                    │
-        ┌──────────┴──────────┐
-        │                     │
-        ▼                     ▼
-┌───────────────┐   ┌──────────────────────────────────┐
-│  2× TB6612FNG │   │  DC-DC Buck Converter            │
-│  Motor Driver │   │  Input: 11.2–14.6V               │
-│               │   │  Output: 5V / 8A (40W)           │
-│  VM: 12.8V    │   │  (XL4016)                        │
-│  (within      │   └─────────────┬────────────────────┘
-│  4.5–15V spec)│                 │ BuckVout (5V rail)
-│               │      ┌──────────┴──────────────────────────────┐
-│  4× Encoder   │      │                                         │
-│  TT Motors    │      ▼                    ▼                      │
-└───────────────┘  ┌──────────────┐   ┌─────────────────┐         │
-                   │ RelayCoil+   │   │ Esp32VIN        │         │
-                   │ Pi5V path    │   │ (always on 5V)  │         │
-                   │ (switched)   │   └────────┬────────┘         │
-                   └──────┬───────┘            │                  │
-                          │    ESP32 GPIO     │                  │
-                          │    closes relay   │                  │
-                          ▼                   │                  │
-                   ┌──────────────┐◄──────────┘                  │
-                   │ Pi5V_USB-C   │   (common GND; not in series │
-                   │ via relay NO │    with ESP32 supply)         │
-                   └──────────────┘                               │
+      ┌────────────┴────────────┐
+      │                         │
+      ▼                         ▼
+┌───────────────┐     ┌──────────────────────────────────┐
+│ DC-DC Buck    │     │  DC-DC Buck Converter            │
+│ Converter     │     │  Input: up to 16.8V              │
+│ (XL4016)      │     │  Output: 5V / 8A (40W)           │
+│ Out: 6.0V/8A  │     │  (XL4016)                        │
+└──────┬────────┘     └─────────────┬────────────────────┘
+       │                            │ BuckVout (5V rail)
+       │               ┌────────────┴──────────────────────────────┐
+       ▼               │                                           │
+┌───────────────┐      ▼                    ▼                      │
+│  2× TB6612FNG │ ┌──────────────┐   ┌─────────────────┐           │
+│  Motor Driver │ │ RelayCoil+   │   │ Esp32VIN        │           │
+│               │ │ Pi5V path    │   │ (always on 5V)  │           │
+│  VM: 6.0V     │ │ (switched)   │   └────────┬────────┘           │
+│  (safe limits)│ └──────┬───────┘            │                    │
+│               │        │    ESP32 GPIO      │                    │
+│  4× Encoder   │        │    closes relay    │                    │
+│  TT Motors    │        ▼                    │                    │
+└───────────────┘ ┌──────────────┐◄───────────┘                    │
+                  │ Pi5V_USB-C   │                                 │
+                  │ via relay NO │                                 │
+                  └──────────────┘                                 │
 ```
 
 **5V topology:** **ESP32 VIN** and **relay module VCC** tie directly to **buck VOUT+**. Only the **Raspberry Pi 5V** path runs **through the relay contacts** (Pi off, ESP32 still powered). “Upstream of the relay” means **parallel to the Pi feed**, not “before the battery master switch.”
@@ -59,17 +58,16 @@ Many RC-style harnesses use a **DPST** toggle: **both red and black** run throug
 Battery ──XT60──► [ DPST: RED + BLACK both through switch ] ──XT60──► rest of robot
 ```
 
-#### Step 2: After the switch — 1→3 XT60 splitter → TB6612 ×2 + XL4016
+#### Step 2: After the switch — 1→2 Splitter → 5V Buck + 6V Buck
 
-Plug the **load-side XT60** of the switch into a **1-to-3 parallel XT60 splitter**. Inside that harness, the input **red** is bussed to three reds and the input **black** to three blacks — same voltage on every branch; current is shared.
-
-You can **cut off the three output XT60 plugs** and solder **each pair** to one board:
+Plug the **load-side XT60** of the switch into a **1-to-2 parallel XT60 splitter** (or cut/splice thick wires directly). The two output pairs route the raw up to 16.8V battery voltage to your two buck converters:
 
 | Branch | Red → | Black → |
 | --- | --- | --- |
-| 1 | TB6612FNG #1 **VM** (or **VCC** motor supply) | TB6612FNG #1 **GND** |
-| 2 | TB6612FNG #2 **VM** | TB6612FNG #2 **GND** |
-| 3 | XL4016 **VIN+** (or **IN+**) | XL4016 **VIN−** (or **IN−**) |
+| 1 | Logic Buck (XL4016) **VIN+** | Logic Buck **VIN−** |
+| 2 | Motor Buck (XL4016) **VIN+** | Motor Buck **VIN−** |
+
+*Note: The Motor Buck's output (set to exactly 6V) then splices to feed the `VM` pins of both TB6612FNG drivers so they receive a safe 6V limit. Do not connect the battery directly to the TB6612FNG `VM` pins or they will explode (15V limit).*
 
 **Yes — every branch needs both red and black.** DC only flows in a loop; **VM/VIN+ without GND/VIN−** (or the reverse) does nothing useful and can damage something if signals are connected without a common return.
 
@@ -112,14 +110,6 @@ The buck converter's **VOUT−** connects to the same **common ground bus**.
 #### Complete Physical Wiring Diagram
 
 ```
-BATTERY          MASTER SWITCH (DPST: RED+BLK)     1→3 SPLITTER          12V LOADS
-═══════          ═══════════════════════════        ═════════════          ═════════
-
-(+) RED ──XT60──► both legs ON/OFF ──XT60──►  ├── red → TB6612 #1 VM
-                                             ├── red → TB6612 #2 VM
-                                             └── red → XL4016 VIN+
-                                                    │
-                                              [buck 12.8V→5V]
                                                     │
                                               VOUT+ (5V) ──► ESP32 / relay / PCA9685 / Pi (via relay)
 
@@ -130,24 +120,24 @@ BATTERY          MASTER SWITCH (DPST: RED+BLK)     1→3 SPLITTER          12V L
                               COMMON GND ◄──── VOUT− + ESP32 GND + Pi GND + relay GND + PCA9685 GND
 ```
 
-> **Summary:** After the switch you have one **XT60 pair** (red + black). The **1→3 splitter** gives **three parallel pairs**; solder **each full pair** to one of the two TB6612 boards and the XL4016. All blacks meet one **common ground** with the 5V return and logic grounds.
+> **Summary:** After the switch you have one **XT60 pair** (red + black). The **1→2 splitter** routes battery power to two buck converters. The 5V logic buck powers the compute string. The 6V motor buck feeds purely the VM pins of the dual TB6612FNG drivers. All blacks meet at a **common ground**.
 
 ## Rail Summary
 
 | Rail | Voltage | Source | Powers |
 | --- | --- | --- | --- |
-| Main bus | 12.8V (nom.) | 4S LiFePO4 pack | TB6612FNG VM input, Buck converter input |
-| Motor rail | 12.8V (nom.) | Main bus → TB6612FNG | 4× TT encoder motors (PWM-capped to ~6V avg) |
+| Main bus | 14.8V (16.8V max) | 4S Graphene LiPo | 5V Logic Buck input, 6V Motor Buck input |
+| Motor rail | 6.0V | 6V Motor Buck → TB6612FNG **VM** | 4× TT encoder motors (Full 0-100% PWM safe) |
 | 5V logic rail | 5V / up to 8A | High-current DC-DC Buck (XL4016) | ESP32 VIN (via onboard LDO), Relay coil VCC, Pi 5 (via relay), PCA9685 **V+** (servo motor power only) |
 | 3.3V | 3.3V | ESP32 onboard AMS1117 LDO (from 5V VIN) | ESP32 logic, PCA9685 **VCC** (I2C logic power — avoids 5V pull-ups on ESP32 I2C bus), pan/tilt servo signal lines |
 
 ## Key Design Decisions
 
-**Why 4S LiFePO4 (12.8V)?**
-The TB6612FNG accepts 4.5–15V on the motor supply. 4S LiFePO4 full charge is 14.6V — safely within spec (with 0.4V margin). Running motors closer to their 6V TT-motor rating is done via PWM duty cycle (47% duty at 12.8V ≈ 6.0V average). LiFePO4 offers no thermal runaway, >1200 cycle life, and a nearly flat discharge curve giving consistent motor behavior throughout the charge.
+**Why 4S Graphene LiPo?**
+At ~150g, a drone battery is massively lighter than standard Li-Ion or LiFePO4 robot packs. TT motors and mecanum wheels perform notoriously poorly under heavy payloads; dropping 600g out of the chassis yields a much faster, agile robot that can slide longitudinally without stalling. 
 
-**Why not power motors from a separate 6V rail?**
-Adding a second high-current buck converter adds cost, board space, and weight. PWM-based speed control through the TB6612FNG is the standard approach for TT-scale robots and provides adequate precision when combined with encoder feedback.
+**Why power motors from a dedicated 6V buck?**
+Because the drone battery reaches 16.8V fully charged, it exceeds the TB6612FNG motor driver's absolute maximum rating of 15V. Pumping 16.8V directly into the motor drivers will fry them. By using a second high-current XL4016 buck converter (8A) to cap the motor supply (VM) at exactly 6.0V, we protect the driver chip *and* allow the Python code to safely output a full 100% PWM duty cycle curve to the TT motors (which are rated for 6V). We strictly use an 8A XL4016 rather than a 3A LM2596 because 4 motors can generate a combined 5.6A+ load during simultaneous stalls; an LM2596 would collapse or overheat during the stall window.
 
 Optional **INA219/INA226** (I2C) high-side or low-side shunt sensing on the motor path (see BOM) can back up encoder-based stall cutout if an encoder cable fails.
 
@@ -157,17 +147,8 @@ The Pi 5 alone can draw up to 5A. Therefore, a high-current buck converter like 
 **ESP32 standby behavior and Power Switching:**
 The ESP32 **VIN** is fed from **buck VOUT+** on the **same** 5V bus as the relay coil — **not** through the relay’s switched path to the Pi — so the ESP32 stays alive when the Pi is off. (Do not confuse this with the **battery master** DPST switch, which removes all loads.) The ESP32 draws ~10μA in deep-sleep. On wake (BLE, RTC, or button), it drives the relay so **only** the Pi 5V feed is energized. **Crucial Note:** A high-side switch or relay on the **Pi 5V path** preserves a **shared system ground**. A low-side N-channel cut on Pi “ground” would break that reference and risks current through data lines.
 
-**BMS protection:**
-The built-in 4S 40A balanced BMS in the pack prevents over-discharge (below ~11.2V / 2.8V per cell), over-charge (above ~14.6V / 3.65V per cell), cell imbalance, and short-circuit faults. The master power switch (your XT60 harness) provides a hard disconnect for storage.
-
-**14.6V full-charge and TB6612FNG safety margin:**
-At full charge (14.6V), the motor supply is only 0.4V below the TB6612FNG's 15V absolute maximum. This is acceptable because:
-1. Under load, the battery voltage immediately sags to ~13.0–13.5V.
-2. LiFePO4 has a very flat discharge curve — it spends >90% of its time between 12.4V and 13.2V.
-3. The BMS limits charging to 14.6V ± 0.2V, so it cannot exceed 14.8V.
-4. The 47% PWM cap means the motor driver never sources sustained high current at peak voltage.
-
-If this margin concerns you, add a single Schottky diode (e.g., SB560, 5A 60V) in series on the motor driver VM path — it drops ~0.4V, bringing the worst-case from 14.8V to 14.4V.
+**LiPo Protection (No BMS!):**
+Drone LiPos **DO NOT** have an internal BMS. If you leave the robot on, it will drain the battery to 0V and cause a chemical fire hazard upon recharging. You must plug a BX100 low-voltage buzzer into the white balance port on the battery to screech at you when any cell hits 3.5V so you can immediately power off the robot.
 
 ---
 
@@ -175,37 +156,29 @@ If this margin concerns you, add a single Schottky diode (e.g., SB560, 5A 60V) i
 
 | Property | Value |
 | --- | --- |
-| Chemistry | LiFePO4 (32700 cells) |
-| Configuration | 4S1P |
-| Nominal voltage | 12.8V |
-| Full charge voltage | 14.6V |
-| BMS cutoff (min) | ~11.2V (2.8V/cell) |
-| Capacity | 7Ah (89.6Wh) |
-| BMS | 4S 40A balanced |
-| Max charge current | 7A |
-| Cycle life | >1200 cycles @ 0.2C |
-| Weight | ~760g |
-| Charge temp | 0 to 45°C |
-| Discharge temp | −20 to 60°C |
-| Ingress | IP5 |
+| Chemistry | Graphene LiPo |
+| Configuration | 4S (4 cell series) |
+| Nominal voltage | 14.8V |
+| Full charge voltage | 16.8V |
+| Absolute minimum limit | ~12.8V (3.2V/cell) |
+| Capacity | 1300mAh (19.2Wh) |
+| Discharge rating | 75C |
+| Weight | ~150g |
 
-> **Charger:** Use a **LiFePO4-specific** balance charger rated for 4S (14.6V). Do NOT use a standard Li-Ion charger (which targets 16.8V for 4S Li-Ion) — it will overcharge the cells and damage or destroy them.
+> **Charger:** Use a standard RC **LiPo balance charger**. Ensure the mode is set to **LiPo (4.2V/cell)**, not LiFePO4!
 
 ---
 
 ## Power Budget Estimate
 
-| Consumer | Voltage | Max Current | Max Power |
+| Consumer | Voltage | Peak Current | Average Power |
 | --- | --- | --- | --- |
-| Raspberry Pi 5 (under load) | 5V | 5.0A | 25.0W |
-| 2× SG90 servos (stall, worst case) | 5V | 1.4A | 7.0W |
-| ESP32 (active) | 5V → 3.3V | 0.24A | 0.8W |
-| PCA9685 (logic) | 5V | 0.01A | 0.05W |
-| Relay module | 5V | 0.07A | 0.35W |
-| **5V rail total** | **5V** | **~6.7A** | **~33.2W** |
-| 4× TT motors (running loaded) | 12.8V (PWM) | ~2.0A total | ~12.0W |
-| **System total from battery** | **12.8V** | — | **~45W** |
+| Raspberry Pi 5 (under load) | 5V | 5.0A | ~15.0W |
+| 2× SG90 servos | 5V | 1.4A | ~2.0W |
+| ESP32 + Aux (active) | 5V / 3.3V | 0.3A | ~1.5W |
+| 4× TT motors (running loaded) | 6V | ~2.0A | ~12.0W |
+| **System total** | — | — | **~30.5W** |
 
-At 12.8V and 45W total draw, the battery supplies ~3.5A. With 7Ah capacity, theoretical runtime is ~2 hours. Real-world runtime with typical (not worst-case) loads: **2.5–3 hours**.
+With an average draw of ~30W, the 19.2Wh drone battery will yield a runtime of **~35-45 minutes**. Keep the low voltage alarm loud!
 
 The XL4016 buck converter is rated 8A — the 5V rail peak of ~6.7A is within spec with 1.3A headroom. ✅

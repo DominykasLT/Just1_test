@@ -74,7 +74,7 @@ Each TB6612FNG controls 2 motors. 2 chips → 4 motors total.
 | Motor RR PWM | GPIO 19 (hw PWM1_1) | — | PWMB |
 | Chip #2 Standby | GPIO 8 | — | STBY |
 | Logic supply (VCC) | Pi 3.3V pin | VCC | VCC |
-| Motor supply (VM) | Main bus 12.8V | VM | VM |
+| Motor supply (VM) | Output of 6.0V Motor Buck | VM | VM |
 | Ground | GND | GND | GND |
 
 > Pi 5 has exactly 4 hardware PWM channels (GPIO 12, 13, 18, 19) — all 4 are used for motor speed control.
@@ -152,7 +152,7 @@ Two 74LVC125A chips needed: each has 4 channels, 4 motors × 2 signals = 8 total
 
 | Signal | ESP32 Pin | Destination | Purpose |
 | --- | --- | --- | --- |
-| Switch Gate | GPIO 32 | High-Side Switch control | HIGH = Pi powered ON, LOW = Pi powered OFF |
+| Relay Control | GPIO 32 | High-Side Relay coil control | HIGH = Pi powered ON, LOW = Pi powered OFF |
 | UART TX | GPIO 17 (U2TXD) | Pi GPIO 15 (RXD) | Send encoder ticks / status to Pi (optional) |
 | UART RX | GPIO 16 (U2RXD) | Pi GPIO 14 (TXD) | Receive pan/tilt commands from Pi (optional) |
 | I2C SDA | GPIO 21 | PCA9685 SDA | I2C servo driver — pan/tilt PWM commands |
@@ -161,18 +161,19 @@ Two 74LVC125A chips needed: each has 4 channels, 4 motors × 2 signals = 8 total
 | Power | 5V rail (via LDO) | — | ESP32 3.3V internal reg |
 
 **Wake-up sequence:**
-1. ESP32 enters deep-sleep → draws ~10μA
+1. ESP32 enters deep-sleep → draws ~10μA. (Its UART TX pin is configured as a high-impedance input before sleep to prevent back-powering the Pi.)
 2. Wake trigger fires (BLE packet, button press, or RTC timer)
-3. ESP32 pulls MOSFET gate HIGH
-4. Pi 5V rail energizes → Pi boots
-5. Pi signals ESP32 over UART that it is ready
-6. ESP32 begins sending servo commands to PCA9685 over I2C and (optionally) forwarding encoder data to Pi over UART
+3. ESP32 pulls relay control pin HIGH
+4. Pi 5V rail energizes → Pi boots. (ESP32 keeps UART TX as a high-impedance input during this phase to avoid pushing 3.3V into the unpowered Pi RX pin.)
+5. Pi completes boot and signals ESP32 over UART that it is ready
+6. ESP32 configures its UART TX pin as an output and begins sending servo commands to PCA9685 over I2C and forwarding data to Pi over UART.
 
 **Shutdown sequence:**
 1. Pi sends UART shutdown signal to ESP32
 2. Pi runs `sudo shutdown -h now`
-3. After Pi GPIO goes low (confirms shutdown), ESP32 pulls MOSFET gate LOW
-4. ESP32 enters deep-sleep
+3. After Pi GPIO goes low (confirms shutdown), ESP32 immediately reconfigures its UART TX pin as a high-impedance input to prevent back-powering.
+4. ESP32 pulls relay control pin LOW
+5. ESP32 enters deep-sleep
 
 ---
 
@@ -270,13 +271,14 @@ Motor control and STBY pin assignments match `just1_motors/utils_motors.py`. Enc
 | Issue | Risk | Status | Resolution |
 | --- | --- | --- | --- |
 | Encoder signal voltage (5V vs 3.3V) | HIGH | ✅ RESOLVED | 74LVC125A quad level shifter added to BOM (2 chips, 8 channels total). LVC variant accepts 5V input while powered from 3.3V — safe for Pi 5 GPIO. |
-| Motor voltage too high for TT motors (12.8V vs 6V rated) | MEDIUM | ✅ RESOLVED | `MAX_MOTOR_SPEED = 47` constant implemented in `utils_motors.py`. Speed is clamped before every motor command: 12.8V × 0.47 ≈ 6.0V average. 4S LiFePO4 battery (12.8V nominal, 14.6V full charge) stays within TB6612FNG 15V max. |
+| Motor voltage too high for TB6612 and TT motors (16.8V LiPo fully charged) | HIGH | ✅ RESOLVED | The 16.8V LiPo exceeds the 15V limit of the TB6612FNG. We added a dedicated 6.0V Buck Converter for the motor rail. Since the physical rail is 6V, the TB6612 is protected, and we can set `MAX_MOTOR_SPEED = 100` (full PWM range) in code safely. We specifically use an 8A XL4016 for this as smaller bucks (like the LM2596) will collapse under heavy TT motor stall spikes. |
 | Pan/tilt cable management for CSI ribbon | MEDIUM | ✅ RESOLVED | 20cm flexible CSI extension cable added to BOM. Route cable along the tilt servo rotation axis to minimize flexion. Tilt range enforced at ±45° in ESP32 servo firmware to prevent over-twist. |
 | Encoder reading accuracy under Linux RT | LOW-MEDIUM | ⚠️ NOTED | On Pi 5, prefer **gpiozero + lgpio** (same stack as motor PWM). `pigpio` is not suitable on Pi 5 (RP1 GPIO). For lowest jitter, route encoder signals to ESP32 and forward tick counts to Pi over UART (encoder ROS2 bridge). |
 | Wheel encoder software on Pi | MEDIUM | ✅ RESOLVED (stall) | `encoder_watcher.py` feeds `feed_watchdog()` from ENC_A edges. Stall latch in `utils_motors.py` stops command streams from defeating the watchdog. Full quadrature odometry remains future work; navigation odometry stays lidar-based (`icp_odometry`). |
 | ESP32 + Pi UART conflict during boot | LOW | ✅ RESOLVED | ESP32 UART moved to GPIO 16/17 (UART2) to avoid ESP32 ROM boot log spam on UART0. |
 | Ground loop through MOSFET switch | HIGH | ✅ RESOLVED | Replaced IRF520 low-side switch with a High-Side Load Switch / Relay to maintain common system ground and prevent phantom powering the Pi via data lines. |
+| Pi UART back-powering via ESP32 | HIGH | ✅ RESOLVED | If ESP32 is awake or sleeping with its UART TX driven HIGH, it will bleed 3.3V into the unpowered Pi's RX pin, powering the Pi via ESD diodes. This is mitigated by configuring the ESP32 UART TX pin as a high-impedance input prior to powering down the relay or prior to ESP32 deep sleep, and only initializing the UART TX as an output *after* the Pi boots. |
 | Pi 5 power brownouts from servos | HIGH | ✅ RESOLVED | PCA9685 servo driver added. Its dedicated V+ power rail (isolated from the VCC logic pin) sources all SG90 stall current directly from the 5V bus without coupling transients back to the Pi logic supply. XL4016 8A buck converter provides headroom for Pi (5A) + both servos (700mA stall each) simultaneously. |
-| TB6612FNG current limit (1.2A/ch) for TT motors | MEDIUM | ⚠️ MANAGED | DFRobot FIT0450 motors draw ~0.17A no-load, ~0.5A running, but 2.8A at stall — above TB6612FNG 1.2A continuous rating. Within the 3.2A peak rating for brief transient events. Mitigated by: (1) 47% PWM cap limits average voltage to ~6.0V so normal running current stays well under 1.2A; (2) encoder-fed stall watchdog + stall latch in `utils_motors.py` cuts PWM if a wheel does not produce ENC_A edges for ~500ms. Optional **INA219/INA226** motor-rail current sense (see BOM) adds protection if encoder wiring fails. |
-| 4S LiFePO4 voltage sag under full load | LOW | ✅ ACCEPTABLE | BMS handles low-voltage cutoff at ~11.2V. Buck converter input minimum is ~7V; BMS cutoff is ~11.2V — 4.2V headroom. TB6612FNG minimum VM is 4.5V — never at risk. Full charge (14.6V) is within TB6612FNG 15V max with 0.4V margin. |
+| TB6612FNG current limit (1.2A/ch) for TT motors | MEDIUM | ⚠️ MANAGED | DFRobot FIT0450 motors draw ~0.17A no-load, ~0.5A running, but 2.8A at stall — above TB6612FNG 1.2A continuous rating. Mitigated by hardware XL4016 8A motor buck handling the initial stall spike safely, while a software encoder-fed stall watchdog in `utils_motors.py` cuts PWM if a wheel does not produce ENC_A edges for ~500ms. |
+| Drone LiPo lacks internal BMS protection | HIGH | ✅ MANAGED | A purely RC LiPo will drain to 0V and rapidly become a severe fire hazard. A BX100 RC Battery Alarm must be connected to the LiPo balance connector at all times during use. It screeches loudly if any cell drops to 3.5V, prompting manual shutdown. |
 | SPI0 pins (GPIO 8–11) used for TB6612FNG #2 | LOW | ✅ ACCEPTABLE | No SPI device in this build. Disable SPI0 in device tree config. If SPI is needed in future, re-route TB6612FNG #2 direction pins to other free GPIO. |

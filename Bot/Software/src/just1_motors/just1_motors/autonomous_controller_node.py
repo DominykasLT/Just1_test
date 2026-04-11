@@ -27,14 +27,12 @@ class AutonomousMotorController(Node):
         self.wheel_separation_y = (
             0.13  # meters (distance between left and right wheels)
         )
-        # The FIT0450 motor is rated 160 RPM at 6V. The battery supplies 12.8V,
-        # so at 100% duty the motor would theoretically spin at ~341 RPM
-        # (160 × 12.8/6). We set max_rpm to this value so that rpm_to_percent
-        # produces a duty cycle that maps linearly to actual motor speed.
-        # The safety clamp in control_wheel (MAX_MOTOR_SPEED=47%) then caps
-        # effective voltage at ~6V / 160 RPM. This keeps Nav2's velocity
-        # commands proportional to real motor output across the usable range.
-        self.max_rpm = 341  # 160 RPM × (12.8V / 6V) — theoretical RPM at 100% duty
+        # The FIT0450 motor is rated 160 RPM at 6V. The drone battery voltage is safely
+        # stepped down to exactly 6V by a dedicated hardware buck converter before 
+        # reaching the motor driver. Because 100% PWM duty cycle now equals exactly 6V, 
+        # the motor achieves exactly its nameplate 160 RPM at max speed.
+        # This gives perfectly accurate 1:1 mapping for Nav2 velocity commands.
+        self.max_rpm = 160
 
         # Create subscriber for cmd_vel
         self.cmd_vel_subscription = self.create_subscription(

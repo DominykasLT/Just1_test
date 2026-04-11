@@ -11,10 +11,11 @@ Device.pin_factory = LGPIOFactory()
 
 logger = logging.getLogger(__name__)
 
-# TT encoder motors in this build are rated 6V. The 4S LiFePO4 battery
-# supplies 12.8V nominal to the TB6612FNG motor rail. Capping PWM duty at 47%
-# keeps the average motor voltage at ~6.0V (12.8V × 0.47), within motor spec.
-MAX_MOTOR_SPEED = 47  # percent (0–100 scale)
+# TT encoder motors in this build are rated 6V. The drone battery supplies up to 16.8V,
+# but a dedicated hardware buck converter steps this down to exactly 6V for the 
+# TB6612FNG motor rail. Because the hardware limits the maximum voltage, the software
+# can safely utilize the full 0–100% PWM range without overdriving the motors.
+MAX_MOTOR_SPEED = 100  # percent (0–100 scale)
 
 # ── Stall Watchdog Configuration ─────────────────────────────────────────────
 # The TB6612FNG is rated 1.2A continuous per channel. The FIT0450 motors
