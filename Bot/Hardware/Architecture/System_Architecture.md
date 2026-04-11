@@ -74,7 +74,7 @@ Each TB6612FNG controls 2 motors. 2 chips → 4 motors total.
 | Motor RR PWM | GPIO 19 (hw PWM1_1) | — | PWMB |
 | Chip #2 Standby | GPIO 8 | — | STBY |
 | Logic supply (VCC) | Pi 3.3V pin | VCC | VCC |
-| Motor supply (VM) | Main bus 11.1V | VM | VM |
+| Motor supply (VM) | Main bus 12.8V | VM | VM |
 | Ground | GND | GND | GND |
 
 > Pi 5 has exactly 4 hardware PWM channels (GPIO 12, 13, 18, 19) — all 4 are used for motor speed control.
@@ -182,12 +182,12 @@ Two 74LVC125A chips needed: each has 4 channels, 4 motors × 2 signals = 8 total
 | --- | --- | --- | --- |
 | I2C SDA | GPIO 21 | SDA | I2C data — default ESP32 I2C bus |
 | I2C SCL | GPIO 22 | SCL | I2C clock |
-| Logic power | 3.3V or 5V | VCC | PCA9685 logic supply (3.3V–5V tolerant) |
-| Servo power | 5V rail | V+ | Dedicated servo power rail on PCA9685, isolated from VCC logic |
+| Logic power | **3.3V** output | **VCC** | **Must be 3.3V from ESP32**, not 5V. The PCA9685 has 10 kΩ I2C pull-up resistors tied to VCC; if VCC = 5V, SDA/SCL are pulled to 5V and will over-voltage the ESP32 GPIO inputs (3.3V max), causing hardware damage. |
+| Servo power | 5V rail (buck) | V+ | Dedicated servo motor power rail on PCA9685, isolated from VCC logic. Sources up to 1.4A stall for 2× SG90. |
 | Ground | GND | GND | Common ground |
 
 > PCA9685 default I2C address: **0x40** (all address pins low). Up to 62 boards can be chained on one I2C bus.
-> The V+ pin feeds the servo output headers directly — do NOT connect V+ to the same node as VCC. This isolation is what prevents SG90 stall current spikes from reaching the 5V logic rail and brownouting the Pi.
+> **VCC** (logic) is wired to **ESP32 3.3V**; **V+** (servo motor power) is wired to the **5V buck rail**. The PCA9685 internally isolates V+ from VCC so SG90 stall current spikes do not propagate to the logic rail or Pi. Keeping VCC at 3.3V ensures I2C pull-ups hold SDA/SCL at a safe level for the ESP32.
 
 ### PCA9685 ↔ Pan/Tilt Servo Mount
 
@@ -208,31 +208,27 @@ Two 74LVC125A chips needed: each has 4 channels, 4 motors × 2 signals = 8 total
 ## Software / ROS2 Node Map
 
 ```
-[Joystick Controller]──────►[just1_joystick_driver]──────►/cmd_vel
+[Joystick Controller]──────►[just1_joystick_driver]──────►/joy  (manual)
                                                              │
 [LD19 Lidar]───────────────►[ldlidar_stl_ros2]────────────►/scan
-                                                             │
-[MPU6050 IMU]──────────────►[just1_imu]──────────────────►/imu/data
-                                                             │
-[AI Camera (IMX500)]────────►[just1_camera]──────────────►/camera/image_raw
-                                                             │
-[Encoder TB6612FNG]────────►[just1_motors]◄───────────────/cmd_vel
-                              │                             │
-                              ▼                             │
-                           /odom ─────────────────────────►[Nav2 Stack]
-                                                             │
-                                                             ▼
-                                                       Autonomous nav
-                                                       + SLAM mapping
+         │                                                   │
+         └────────────►[sync + icp_odometry (rtabmap_odom)]──►/odom ──►[Nav2 Stack]
+                              ▲                                │
+[MPU6050 IMU]──►[just1_imu]───┘                                │
+                                                              ▼
+[AI Camera (IMX500)]────────►[just1_camera]──────────────►/camera/...   Autonomous nav
+                                                             │          + SLAM mapping
+[TB6612FNG + TT motors]────►[just1_motors]◄────────────────/cmd_vel
+(encoders on Pi GPIO → `encoder_watcher` ENC_A edges → `feed_watchdog`; full quadrature /odom from wheels not implemented)
 ```
 
-> The `just1_motors` node reads encoder ticks (via GPIO interrupts), computes wheel velocities, publishes `/odom`, and converts incoming `/cmd_vel` to per-motor PWM and direction signals for the TB6612FNG chips.
+> Motor control: `just1_motors` (`manual_controller_node` / `autonomous_controller_node`) converts `/cmd_vel` (autonomous) or joystick input (manual) to per-wheel PWM and direction on the TB6612FNG. Encoder **ENC_A** lines (GPIO 4, 6, 16, 21) are read with **gpiozero + lgpio** (`encoder_watcher.py`) and call `feed_watchdog()` so the stall watchdog can detect blocked wheels. A **stall latch** blocks PWM after a trip until that wheel receives a zero command or an encoder edge clears the latch (prevents `/cmd_vel` streams from re-arming stall). **Odometry** for navigation remains **lidar + IMU** (`icp_odometry` in bringup), not wheel encoders.
 
 ---
 
 ## GPIO Pin Allocation Summary (Pi 5)
 
-All assignments match the implementation in `just1_motors/utils_motors.py`. No conflicts between motor control, encoder, and communication pins.
+Motor control and STBY pin assignments match `just1_motors/utils_motors.py`. Encoder **ENC_A** pins are opened in `just1_motors/encoder_watcher.py` (same process as motor nodes). No conflicts between motor control, encoder, and communication pins.
 
 | GPIO | Function | Connected To |
 | --- | --- | --- |
@@ -274,12 +270,13 @@ All assignments match the implementation in `just1_motors/utils_motors.py`. No c
 | Issue | Risk | Status | Resolution |
 | --- | --- | --- | --- |
 | Encoder signal voltage (5V vs 3.3V) | HIGH | ✅ RESOLVED | 74LVC125A quad level shifter added to BOM (2 chips, 8 channels total). LVC variant accepts 5V input while powered from 3.3V — safe for Pi 5 GPIO. |
-| Motor voltage too high for TT motors (11.1V vs 6V rated) | MEDIUM | ✅ RESOLVED | `MAX_MOTOR_SPEED = 55` constant implemented in `utils_motors.py`. Speed is clamped before every motor command: 11.1V × 0.55 ≈ 6.1V average. If switching to LiFePO4 (12.8V), update constant to `47`. |
+| Motor voltage too high for TT motors (12.8V vs 6V rated) | MEDIUM | ✅ RESOLVED | `MAX_MOTOR_SPEED = 47` constant implemented in `utils_motors.py`. Speed is clamped before every motor command: 12.8V × 0.47 ≈ 6.0V average. 4S LiFePO4 battery (12.8V nominal, 14.6V full charge) stays within TB6612FNG 15V max. |
 | Pan/tilt cable management for CSI ribbon | MEDIUM | ✅ RESOLVED | 20cm flexible CSI extension cable added to BOM. Route cable along the tilt servo rotation axis to minimize flexion. Tilt range enforced at ±45° in ESP32 servo firmware to prevent over-twist. |
-| Encoder reading accuracy under Linux RT | LOW-MEDIUM | ⚠️ NOTED | Use `pigpio` library (DMA-based GPIO, lower jitter than default `gpiozero` on Linux). Alternatively, route encoder signals to ESP32 and send tick counts to Pi over UART — fully resolves jitter at the cost of adding an encoder ROS2 bridge node. |
+| Encoder reading accuracy under Linux RT | LOW-MEDIUM | ⚠️ NOTED | On Pi 5, prefer **gpiozero + lgpio** (same stack as motor PWM). `pigpio` is not suitable on Pi 5 (RP1 GPIO). For lowest jitter, route encoder signals to ESP32 and forward tick counts to Pi over UART (encoder ROS2 bridge). |
+| Wheel encoder software on Pi | MEDIUM | ✅ RESOLVED (stall) | `encoder_watcher.py` feeds `feed_watchdog()` from ENC_A edges. Stall latch in `utils_motors.py` stops command streams from defeating the watchdog. Full quadrature odometry remains future work; navigation odometry stays lidar-based (`icp_odometry`). |
 | ESP32 + Pi UART conflict during boot | LOW | ✅ RESOLVED | ESP32 UART moved to GPIO 16/17 (UART2) to avoid ESP32 ROM boot log spam on UART0. |
 | Ground loop through MOSFET switch | HIGH | ✅ RESOLVED | Replaced IRF520 low-side switch with a High-Side Load Switch / Relay to maintain common system ground and prevent phantom powering the Pi via data lines. |
 | Pi 5 power brownouts from servos | HIGH | ✅ RESOLVED | PCA9685 servo driver added. Its dedicated V+ power rail (isolated from the VCC logic pin) sources all SG90 stall current directly from the 5V bus without coupling transients back to the Pi logic supply. XL4016 8A buck converter provides headroom for Pi (5A) + both servos (700mA stall each) simultaneously. |
-| TB6612FNG current limit (1.2A/ch) for TT motors | MEDIUM | ⚠️ MANAGED | DFRobot FIT0450 motors draw ~0.17A no-load, ~0.5A running, but 2.8A at stall — above TB6612FNG 1.2A continuous rating. Within the 3.2A peak rating for brief transient events. Mitigated by: (1) 55% PWM cap limits average voltage to ~6.1V so normal running current stays well under 1.2A; (2) software stall watchdog in `utils_motors.py` must cut power if a motor is blocked for more than ~500ms. Do not allow sustained stall under load. |
-| 3S battery voltage sag under full load | LOW | ✅ ACCEPTABLE | BMS handles low-voltage cutoff. Buck converter input minimum is ~7V; BMS cutoff is ~9.6V — 2.6V headroom. TB6612FNG minimum VM is 4.5V — never at risk. |
+| TB6612FNG current limit (1.2A/ch) for TT motors | MEDIUM | ⚠️ MANAGED | DFRobot FIT0450 motors draw ~0.17A no-load, ~0.5A running, but 2.8A at stall — above TB6612FNG 1.2A continuous rating. Within the 3.2A peak rating for brief transient events. Mitigated by: (1) 47% PWM cap limits average voltage to ~6.0V so normal running current stays well under 1.2A; (2) encoder-fed stall watchdog + stall latch in `utils_motors.py` cuts PWM if a wheel does not produce ENC_A edges for ~500ms. Optional **INA219/INA226** motor-rail current sense (see BOM) adds protection if encoder wiring fails. |
+| 4S LiFePO4 voltage sag under full load | LOW | ✅ ACCEPTABLE | BMS handles low-voltage cutoff at ~11.2V. Buck converter input minimum is ~7V; BMS cutoff is ~11.2V — 4.2V headroom. TB6612FNG minimum VM is 4.5V — never at risk. Full charge (14.6V) is within TB6612FNG 15V max with 0.4V margin. |
 | SPI0 pins (GPIO 8–11) used for TB6612FNG #2 | LOW | ✅ ACCEPTABLE | No SPI device in this build. Disable SPI0 in device tree config. If SPI is needed in future, re-route TB6612FNG #2 direction pins to other free GPIO. |

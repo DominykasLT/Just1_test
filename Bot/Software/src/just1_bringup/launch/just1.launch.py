@@ -135,20 +135,21 @@ def generate_launch_description():
     ld.add_action(camera_node)
 
     # Static transform publisher to define the position and orientation of the Camera relative to the robot's base
-    base_link_to_imu_tf_node = Node(
+    base_link_to_camera_tf_node = Node(
         package="tf2_ros",
         executable="static_transform_publisher",
         name="base_link_to_base_camera",
-        # Arguments: [x, y, z, roll, pitch, yaw, parent_frame, child_frame]
-        # x: 0.14 meters (Camera mounted 14cm in front of base)
-        # y: 0 meters (no offset in y direction)
-        # z: 0.10 meters (Camera mounted 10cm on top of base)
-        # yaw: 0 radians
-        # pitch: 0 radians (no pitch rotation)
-        # roll: 0 radians (no roll rotation)
-        # parent_frame: base_link (robot's base frame)
-        # child_frame: camera_link
-        arguments=["0.14", "0", "0.10", "0", "0", "0", "base_link", "camera_link"],
+        # Camera is 14 cm forward (x), 10 cm above (z), no rotation.
+        arguments=[
+            "--x", "0.14",
+            "--y", "0",
+            "--z", "0.10",
+            "--roll", "0",
+            "--pitch", "0",
+            "--yaw", "0",
+            "--frame-id", "base_link",
+            "--child-frame-id", "camera_link",
+        ],
         condition=IfCondition(
             PythonExpression(
                 [
@@ -161,7 +162,7 @@ def generate_launch_description():
             )
         ),
     )
-    ld.add_action(base_link_to_imu_tf_node)
+    ld.add_action(base_link_to_camera_tf_node)
 
     # Foxglove Bridge node. This node is installed through sudo apt install ros-jazzy-foxglove-bridge
     foxglove_bridge_node = Node(
@@ -279,16 +280,19 @@ def generate_launch_description():
         package="tf2_ros",
         executable="static_transform_publisher",
         name="base_link_to_base_imu",
-        # Arguments: [x, y, z, roll, pitch, yaw, parent_frame, child_frame]
-        # x: 0.07 meters (IMU mounted 7cm in front of base)
-        # y: 0 meters (no offset in y direction)
-        # z: meters (no offset in y direction)
-        # yaw: 3.1415 radians (180 degrees rotation around z-axis)
-        # pitch: 0 radians (no pitch rotation)
-        # roll: 0 radians (no roll rotation)
-        # parent_frame: base_link (robot's base frame)
-        # child_frame: imu_link (IMU's frame)
-        arguments=["0.07", "0", "0", "3.1415", "0", "0", "base_link", "imu_link"],
+        # IMU is 7 cm forward (x), no z offset.
+        # Rotated 180° around Z (yaw=π) because the MPU6050 is mounted reversed
+        # relative to the robot's forward direction.
+        arguments=[
+            "--x", "0.07",
+            "--y", "0",
+            "--z", "0",
+            "--roll", "0",
+            "--pitch", "0",
+            "--yaw", "3.1415",
+            "--frame-id", "base_link",
+            "--child-frame-id", "imu_link",
+        ],
         condition=IfCondition(
             PythonExpression(
                 [
@@ -348,16 +352,19 @@ def generate_launch_description():
         package="tf2_ros",
         executable="static_transform_publisher",
         name="base_link_to_base_laser_ld19",
-        # Arguments: [x, y, z, roll, pitch, yaw, parent_frame, child_frame]
-        # x: 0 meters (no offset in x direction)
-        # y: 0 meters (no offset in y direction)
-        # z: 0.12 meters (LiDAR mounted 12cm above base)
-        # yaw: 1.5708 radians (90 degrees rotation around z-axis)
-        # pitch: 0 radians (no pitch rotation)
-        # roll: 1.5708 radians (no pitch rotation)
-        # parent_frame: base_link (robot's base frame)
-        # child_frame: base_laser (LiDAR's frame)
-        arguments=["0", "0", "0.12", "1.5708", "0", "0", "base_link", "base_laser"],
+        # LiDAR is 12 cm above base (z).
+        # Rotated 90° around Z (yaw=π/2) because the LD19 connector/zero-angle
+        # faces the side of the robot, not the front.
+        arguments=[
+            "--x", "0",
+            "--y", "0",
+            "--z", "0.12",
+            "--roll", "0",
+            "--pitch", "0",
+            "--yaw", "1.5708",
+            "--frame-id", "base_link",
+            "--child-frame-id", "base_laser",
+        ],
         condition=IfCondition(
             PythonExpression(
                 [

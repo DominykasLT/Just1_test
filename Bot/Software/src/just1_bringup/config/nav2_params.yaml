@@ -168,15 +168,15 @@ controller_server:
     # Maximum linear velocity in x (m/s)
     vx_max: 0.4
     # Minimum linear velocity in x (m/s)
-    vx_min: 0.2 # Lower than 0.1 and the robot will not move
+    vx_min: 0.1 # Minimum viable speed (below this, static friction prevents motion)
     # Maximum linear velocity in y (m/s)
     vy_max: 0.4
     # Minimum linear velocity in y (m/s)
-    vy_min: 0.2 # Lower than 0.1 and the robot will not move
+    vy_min: 0.1 # Minimum viable speed (below this, static friction prevents motion)
     # Maximum angular velocity (rad/s)
     wz_max: 3.0
     # Minimum angular velocity (rad/s)
-    wz_min: 1.0 # Lower than 1.0 and the robot will not move
+    wz_min: 0.4 # Allow gentle turns (matches behavior_server min_rotational_vel)
     # Check for collisions
     check_for_collisions: true
     # Tolerance for TF transforms

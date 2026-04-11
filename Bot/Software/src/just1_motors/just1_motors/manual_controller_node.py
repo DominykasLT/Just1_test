@@ -60,6 +60,15 @@ class ManualMotorController(Node):
         speeds_msg.back_right = float(wheel_speeds["back_right"])
         self.publisher.publish(speeds_msg)
 
+    @staticmethod
+    def _reduce_magnitude(value, amount):
+        """Reduce |value| by amount, clamping at zero (never flips sign)."""
+        if value > 0:
+            return max(0.0, value - amount)
+        elif value < 0:
+            return min(0.0, value + amount)
+        return 0.0
+
     def calculate_wheel_speeds_left_stick(self, vertical_value, horizontal_value):
         """
         Calculate the speed for each wheel based on vertical and horizontal values of the left joystick.
@@ -93,16 +102,16 @@ class ManualMotorController(Node):
             # Right wheels get additional speed
             speeds["front_right"] += horizontal_speed
             speeds["back_right"] += horizontal_speed
-            # Left wheels get reduced speed
-            speeds["front_left"] = max(0, speeds["front_left"] - horizontal_speed)
-            speeds["back_left"] = max(0, speeds["back_left"] - horizontal_speed)
+            # Left wheels get reduced speed (sign-aware so reverse turning works)
+            speeds["front_left"] = self._reduce_magnitude(speeds["front_left"], horizontal_speed)
+            speeds["back_left"] = self._reduce_magnitude(speeds["back_left"], horizontal_speed)
         elif horizontal_value > 0.1:  # Turn right
             # Left wheels get additional speed
             speeds["front_left"] += horizontal_speed
             speeds["back_left"] += horizontal_speed
-            # Right wheels get reduced speed
-            speeds["front_right"] = max(0, speeds["front_right"] - horizontal_speed)
-            speeds["back_right"] = max(0, speeds["back_right"] - horizontal_speed)
+            # Right wheels get reduced speed (sign-aware so reverse turning works)
+            speeds["front_right"] = self._reduce_magnitude(speeds["front_right"], horizontal_speed)
+            speeds["back_right"] = self._reduce_magnitude(speeds["back_right"], horizontal_speed)
 
         # Ensure speeds are within -100 to 100 range
         for wheel in speeds:

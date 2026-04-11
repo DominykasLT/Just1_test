@@ -46,11 +46,11 @@ float32 back_right    # Back right wheel speed (-100 to 100)
 **Functionality:**
 - Subscribes to velocity commands from navigation system
 - Converts linear and angular velocities to wheel speeds using mecanum drive kinematics
-- Converts velocity commands to RPM and then to percentage speeds
+- Converts wheel linear speeds to RPM internally, then to signed percent (-100 to 100) for both motor PWM and the `wheel_speeds` topic (same semantics as the manual controller)
 
 **Topics:**
 - **Subscribes to:** `cmd_vel` (geometry_msgs/Twist) - **Variable** (depends on navigation system)
-- **Publishes to:** `wheel_speeds` (just1_interface/WheelSpeeds) - **Variable** (same as cmd_vel input)
+- **Publishes to:** `wheel_speeds` (just1_interface/WheelSpeeds) - **Variable** (same as cmd_vel input); message fields are percent -100 to 100, not RPM
 
 ---
 
